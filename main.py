@@ -9,7 +9,11 @@ from azure.ai.projects import AIProjectClient
 from azure.identity import DefaultAzureCredential
 from azure.ai.agents.models import FunctionTool, ToolSet, MessageTextContent
 
-from tools import add_task, list_tasks, update_task, get_summary, init_db
+from tools import (
+    add_task, list_tasks, update_task, get_summary, init_db,
+    get_projects, delete_task, search_tasks, get_tasks_due_today
+)
+from shortcuts import process_shortcut
 
 
 def main():
@@ -23,7 +27,10 @@ def main():
     )
 
     # Collect user functions to be used as tools
-    user_functions: Set[Callable[..., Any]] = {add_task, list_tasks, update_task, get_summary}
+    user_functions: Set[Callable[..., Any]] = {
+        add_task, list_tasks, update_task, get_summary,
+        get_projects, delete_task, search_tasks, get_tasks_due_today
+    }
 
     # Create toolset with custom functions
     functions = FunctionTool(user_functions)
@@ -43,7 +50,8 @@ def main():
     # Create a thread for the conversation
     thread = project_client.agents.threads.create()
     print(f"Created thread, thread ID: {thread.id}")
-    print("🗂️  Task Manager Agent Ready. Type 'quit' to exit.\n")
+    print("🗂️  Task Manager Agent Ready. Type 'quit' to exit.")
+    print("💡 Tip: Type '/help' to see available shortcuts!\n")
 
     try:
         # Interactive loop
@@ -52,11 +60,20 @@ def main():
             if user_input.lower() == "quit":
                 break
 
+            # Process shortcuts
+            fast_response, modified_input = process_shortcut(user_input)
+
+            # If it's a fast shortcut, display result directly
+            if fast_response is not None:
+                print(f"{fast_response}")
+                continue
+
+            # Use modified input (either expanded AI shortcut or original input)
             # Create a message in the thread
             project_client.agents.messages.create(
                 thread_id=thread.id,
                 role="user",
-                content=user_input,
+                content=modified_input,
             )
 
             # Run the agent on the thread

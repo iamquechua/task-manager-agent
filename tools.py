@@ -37,8 +37,8 @@ def add_task(title: str, project: str, priority: str = "normal",
     conn.close()
     return json.dumps({"status": "created", "task_id": task_id, "title": title, "project": project})
 
-def list_tasks(project: str = None, status: str = None) -> str:
-    """List tasks, optionally filtered by project and/or status."""
+def list_tasks(project: str = None, status: str = None, priority: str = None) -> str:
+    """List tasks, optionally filtered by project, status, and/or priority."""
     conn = sqlite3.connect(DB_PATH)
     query = "SELECT * FROM tasks WHERE 1=1"
     params = []
@@ -48,6 +48,9 @@ def list_tasks(project: str = None, status: str = None) -> str:
     if status:
         query += " AND status = ?"
         params.append(status)
+    if priority:
+        query += " AND priority = ?"
+        params.append(priority)
     query += " ORDER BY CASE priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END"
     rows = conn.execute(query, params).fetchall()
     conn.close()
@@ -79,3 +82,57 @@ def get_summary() -> str:
             summary[project] = {}
         summary[project][status] = count
     return json.dumps(summary, indent=2)
+
+def get_projects() -> str:
+    """Get a list of all unique projects with task counts."""
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute("""
+        SELECT project, COUNT(*) as total,
+               SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) as completed
+        FROM tasks
+        GROUP BY project
+        ORDER BY project
+    """).fetchall()
+    conn.close()
+    projects = [{"name": r[0], "total_tasks": r[1], "completed": r[2]} for r in rows]
+    return json.dumps(projects, indent=2)
+
+def delete_task(task_id: str) -> str:
+    """Delete a task by its ID."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+    conn.commit()
+    deleted = cursor.rowcount
+    conn.close()
+    if deleted > 0:
+        return json.dumps({"status": "deleted", "task_id": task_id})
+    else:
+        return json.dumps({"status": "not_found", "task_id": task_id})
+
+def search_tasks(query: str) -> str:
+    """Search tasks by text in title or description."""
+    conn = sqlite3.connect(DB_PATH)
+    search_pattern = f"%{query}%"
+    rows = conn.execute("""
+        SELECT id, title, project, status, priority, due_date, description
+        FROM tasks
+        WHERE title LIKE ? OR description LIKE ?
+        ORDER BY CASE priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END
+    """, (search_pattern, search_pattern)).fetchall()
+    conn.close()
+    tasks = [{"id": r[0], "title": r[1], "project": r[2], "status": r[3], "priority": r[4], "due_date": r[5], "description": r[6]} for r in rows]
+    return json.dumps(tasks, indent=2)
+
+def get_tasks_due_today() -> str:
+    """Get all tasks due today."""
+    today = datetime.now().date().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute("""
+        SELECT id, title, project, status, priority, due_date
+        FROM tasks
+        WHERE due_date = ? AND status != 'done'
+        ORDER BY CASE priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END
+    """, (today,)).fetchall()
+    conn.close()
+    tasks = [{"id": r[0], "title": r[1], "project": r[2], "status": r[3], "priority": r[4], "due_date": r[5]} for r in rows]
+    return json.dumps(tasks, indent=2)
